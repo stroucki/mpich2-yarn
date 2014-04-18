@@ -8,15 +8,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.yarn.api.AMRMProtocol;
-import org.apache.hadoop.yarn.api.records.AMResponse;
+import org.apache.hadoop.yarn.api.ApplicationMasterProtocol;
+import org.apache.hadoop.yarn.api.protocolrecords.AllocateResponse;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.Container;
 import org.apache.hadoop.yarn.api.records.ContainerId;
-import org.apache.hadoop.yarn.api.records.ContainerState;
 import org.apache.hadoop.yarn.api.records.ResourceRequest;
-import org.apache.hadoop.yarn.exceptions.YarnRemoteException;
-
+import org.apache.hadoop.yarn.exceptions.YarnException;
 
 import com.taobao.yarn.mpi.MPIConfiguration;
 import com.taobao.yarn.mpi.util.Utilities;
@@ -28,7 +26,7 @@ import com.taobao.yarn.mpi.util.Utilities;
  */
 public class MultiMPIProcContainersAllocator implements ContainersAllocator {
   private static final Log LOG = LogFactory.getLog(MultiMPIProcContainersAllocator.class);
-  private final AMRMProtocol resourceManager;
+  private final ApplicationMasterProtocol resourceManager;
   private final int requestPriority;
   private final int containerMemory;
   private final AtomicInteger rmRequestID = new AtomicInteger();
@@ -43,7 +41,7 @@ public class MultiMPIProcContainersAllocator implements ContainersAllocator {
   private final MPIConfiguration conf;
 
   public MultiMPIProcContainersAllocator(
-      AMRMProtocol resourceManager,
+      ApplicationMasterProtocol resourceManager,
       int reuqestPriority,
       int containerMemory,
       ApplicationAttemptId appAttemptId) {
@@ -54,9 +52,9 @@ public class MultiMPIProcContainersAllocator implements ContainersAllocator {
     conf=new MPIConfiguration();
   }
 
-  @Override
+  // @Override
   public synchronized List<Container> allocateContainers(int numContainer)
-      throws YarnRemoteException {
+      throws YarnException {
     List<Container> result = new ArrayList<Container>();
     // Until we get our fully allocated quota, we keep on polling RM for containers
     // Keep looping until all the containers are launched and shell script executed on them
@@ -80,7 +78,7 @@ public class MultiMPIProcContainersAllocator implements ContainersAllocator {
 
       // Send request to RM
       LOG.info(String.format("Asking RM for %d containers", askCount));
-      AMResponse amResp = Utilities.sendContainerAskToRM(
+      AllocateResponse amResp = Utilities.sendContainerAskToRM(
           rmRequestID,
           appAttemptID,
           resourceManager,
@@ -112,7 +110,7 @@ public class MultiMPIProcContainersAllocator implements ContainersAllocator {
             hostToProcNum.put(host, new Integer(procNum));
             // TODO check if this works
             container.getResource().setMemory(procNum * containerMemory);
-            allocatedContainer.setState(ContainerState.COMPLETE);
+            //allocatedContainer.setState(ContainerState.COMPLETE);
           }
         }
       }  // end if
@@ -120,12 +118,12 @@ public class MultiMPIProcContainersAllocator implements ContainersAllocator {
     return result;
   }
 
-  @Override
+  // @Override
   public Map<String, Integer> getHostToProcNum() {
     return hostToProcNum;
   }
 
-  @Override
+  // @Override
   public int getCurrentRequestId() {
     return rmRequestID.get();
   }

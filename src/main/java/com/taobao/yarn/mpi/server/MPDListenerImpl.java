@@ -12,9 +12,9 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.ipc.ProtocolSignature;
 import org.apache.hadoop.ipc.RPC;
 import org.apache.hadoop.ipc.Server;
-import org.apache.hadoop.yarn.SystemClock;
-import org.apache.hadoop.yarn.YarnException;
-import org.apache.hadoop.yarn.service.CompositeService;
+import org.apache.hadoop.service.CompositeService;
+import org.apache.hadoop.yarn.exceptions.YarnException;
+import org.apache.hadoop.yarn.util.SystemClock;
 
 import com.taobao.yarn.mpi.MPIConfiguration;
 import com.taobao.yarn.mpi.util.MPDException;
@@ -52,14 +52,19 @@ public class MPDListenerImpl extends CompositeService implements MPDProtocol, MP
 
   @Override
   public void start() {
-    startRpcServer();
+    try {
+      startRpcServer();
+    } catch (YarnException e) {
+      // TODO Auto-generated catch block
+      e.printStackTrace();
+    }
     super.start();
   }
 
-  private void startRpcServer() {
+  private void startRpcServer() throws YarnException {
     Configuration conf = getConfig();
     try {
-      server = RPC.getServer(MPDProtocol.class, this, "0.0.0.0", 0, conf);
+      server = new RPC.Builder(conf).setProtocol(MPDProtocol.class).setBindAddress("0.0.0.0").setPort(0).setInstance(this).build();
     } catch (IOException e) {
       LOG.error("Error starting MPD Listener", e);
       throw new YarnException(e);

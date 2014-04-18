@@ -25,15 +25,14 @@ import org.apache.hadoop.io.compress.CompressionCodec;
 import org.apache.hadoop.io.compress.CompressionCodecFactory;
 import org.apache.hadoop.ipc.RPC;
 import org.apache.hadoop.mapreduce.MRJobConfig;
-import org.apache.hadoop.yarn.api.AMRMProtocol;
+import org.apache.hadoop.yarn.api.ApplicationClientProtocol;
 import org.apache.hadoop.yarn.api.ApplicationConstants;
-import org.apache.hadoop.yarn.api.ClientRMProtocol;
+import org.apache.hadoop.yarn.api.ApplicationMasterProtocol;
 import org.apache.hadoop.yarn.api.protocolrecords.AllocateRequest;
 import org.apache.hadoop.yarn.api.protocolrecords.AllocateResponse;
 import org.apache.hadoop.yarn.api.protocolrecords.GetApplicationReportRequest;
 import org.apache.hadoop.yarn.api.protocolrecords.GetApplicationReportResponse;
 import org.apache.hadoop.yarn.api.protocolrecords.KillApplicationRequest;
-import org.apache.hadoop.yarn.api.records.AMResponse;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.ApplicationReport;
@@ -42,7 +41,7 @@ import org.apache.hadoop.yarn.api.records.Priority;
 import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.api.records.ResourceRequest;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
-import org.apache.hadoop.yarn.exceptions.YarnRemoteException;
+import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.factories.RecordFactory;
 import org.apache.hadoop.yarn.factory.providers.RecordFactoryProvider;
 import org.apache.hadoop.yarn.ipc.YarnRPC;
@@ -86,7 +85,7 @@ public final class Utilities {
     // setup requirements for hosts, whether a particular rack/host is needed
     // Refer to apis under org.apache.hadoop.net for more details on how to get figure out
     // rack/host mapping. using * as any host will do for the distributed shell app
-    request.setHostName("*");
+    request.setResourceName("*");
     // set number of containers needed
     request.setNumContainers(numContainers);
 
@@ -111,18 +110,18 @@ public final class Utilities {
    * @return Response from RM to AM with allocated containers
    * @throws YarnRemoteException
    */
-  public static AMResponse sendContainerAskToRM(
+  public static AllocateResponse sendContainerAskToRM(
       AtomicInteger rmRequestID,
       ApplicationAttemptId appAttemptID,
-      AMRMProtocol resourceManager,
+      ApplicationMasterProtocol resourceManager,
       List<ResourceRequest> requestedContainers,
       List<ContainerId> releasedContainers,
-      float progress) throws YarnRemoteException {
+      float progress) throws YarnException {
     AllocateRequest req = Records.newRecord(AllocateRequest.class);
     req.setResponseId(rmRequestID.incrementAndGet());
-    req.setApplicationAttemptId(appAttemptID);
-    req.addAllAsks(requestedContainers);
-    req.addAllReleases(releasedContainers);
+    //req.setApplicationAttemptId(appAttemptID);
+    req.setAskList(requestedContainers);
+    req.setReleaseList(releasedContainers);
     req.setProgress(progress);
 
     if (LOG.isDebugEnabled()) {
@@ -139,8 +138,14 @@ public final class Utilities {
       LOG.info("Released container, id=" + id.getId());
     }
 
-    AllocateResponse resp = resourceManager.allocate(req);
-    return resp.getAMResponse();
+    AllocateResponse resp = null;
+    try {
+      resp = resourceManager.allocate(req);
+    } catch (IOException e) {
+      // TODO Auto-generated catch block
+      e.printStackTrace();
+    }
+    return resp;
   }
 
   /**
@@ -373,15 +378,20 @@ public final class Utilities {
    * @param appId Application Id to be killed.
    * @throws YarnRemoteException
    */
-  public static void killApplication(ClientRMProtocol applicationsManager, ApplicationId appId)
-      throws YarnRemoteException {
+  public static void killApplication(ApplicationClientProtocol applicationsManager, ApplicationId appId)
+      throws YarnException {
     KillApplicationRequest request = Records.newRecord(KillApplicationRequest.class);
     // TODO clarify whether multiple jobs with the same app id can be submitted
     // and be running at the same time. If yes, can we kill a particular attempt only?
     request.setApplicationId(appId);
     LOG.info("Killing appliation with id: " + appId.toString());
     // Response can be ignored as it is non-null on success or throws an exception in case of failures
-    applicationsManager.forceKillApplication(request);
+    try {
+      applicationsManager.forceKillApplication(request);
+    } catch (IOException e) {
+      // TODO Auto-generated catch block
+      e.printStackTrace();
+    }
   }
 
   /**
@@ -389,15 +399,15 @@ public final class Utilities {
    * @return Handle to communicate with the ASM
    * @throws IOException
    */
-  public static ClientRMProtocol connectToASM(YarnConfiguration conf) throws IOException {
+  public static ApplicationClientProtocol connectToASM(YarnConfiguration conf) throws IOException {
     YarnRPC rpc = YarnRPC.create(conf);
     InetSocketAddress rmAddress = conf.getSocketAddr(
         YarnConfiguration.RM_ADDRESS,
         YarnConfiguration.DEFAULT_RM_ADDRESS,
         YarnConfiguration.DEFAULT_RM_PORT);
     LOG.info("Connecting to ResourceManager at " + rmAddress);
-    ClientRMProtocol applicationsManager = ((ClientRMProtocol) rpc.getProxy(
-        ClientRMProtocol.class, rmAddress, conf));
+    ApplicationClientProtocol applicationsManager = ((ApplicationClientProtocol) rpc.getProxy(
+        ApplicationClientProtocol.class, rmAddress, conf));
     return applicationsManager;
   }
 
@@ -423,13 +433,20 @@ public final class Utilities {
    * @return
    * @throws YarnRemoteException
    */
-  public static ApplicationReport getApplicationReport(ApplicationId appId, ClientRMProtocol applicationsManager)
-      throws YarnRemoteException {
+  public static ApplicationReport getApplicationReport(ApplicationId appId, ApplicationClientProtocol applicationsManager)
+      throws YarnException {
     RecordFactory recordFactory = RecordFactoryProvider.getRecordFactory(null);
     GetApplicationReportRequest request = recordFactory.newRecordInstance(GetApplicationReportRequest.class);
     request.setApplicationId(appId);
-    GetApplicationReportResponse response = applicationsManager.getApplicationReport(request);
-    ApplicationReport applicationReport = response.getApplicationReport();
+    ApplicationReport applicationReport = null;
+    try {
+      GetApplicationReportResponse response;
+      response = applicationsManager.getApplicationReport(request);
+      applicationReport = response.getApplicationReport();
+    } catch (IOException e) {
+      // TODO Auto-generated catch block
+      e.printStackTrace();
+    }
     return applicationReport;
   }
 
@@ -452,9 +469,9 @@ public final class Utilities {
       String logLevel, long logSize,Vector<CharSequence> vargs) {
     //We will be confused with the values of MRJobConfig.TASK_LOG_DIR and MRJobConfig.TASK_LOG_SIZE, see container-log4j.properties
     vargs.add("-Dlog4j.configuration=container-log4j.properties");
-    vargs.add("-D" + MRJobConfig.TASK_LOG_DIR + "=" +
+    vargs.add("-D" + MRJobConfig.MR_PREFIX+"container.log.dir" + "=" +
         ApplicationConstants.LOG_DIR_EXPANSION_VAR);
-    vargs.add("-D" + MRJobConfig.TASK_LOG_SIZE + "=" + logSize);
+    vargs.add("-D" + MRJobConfig.MR_PREFIX+"container.log.size" + "=" + logSize);
     vargs.add("-Dhadoop.root.logger=" + logLevel + ",CLA");
   }
 

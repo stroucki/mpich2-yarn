@@ -1,21 +1,21 @@
 package com.taobao.yarn.mpi.server;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.yarn.api.AMRMProtocol;
+import org.apache.hadoop.yarn.api.ApplicationMasterProtocol;
 import org.apache.hadoop.yarn.api.protocolrecords.AllocateRequest;
 import org.apache.hadoop.yarn.api.protocolrecords.AllocateResponse;
-import org.apache.hadoop.yarn.api.records.AMResponse;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.ContainerId;
 import org.apache.hadoop.yarn.api.records.Priority;
 import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.api.records.ResourceRequest;
-import org.apache.hadoop.yarn.exceptions.YarnRemoteException;
+import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.util.Records;
 
 public final class Utilities {
@@ -53,7 +53,7 @@ public final class Utilities {
     // setup requirements for hosts, whether a particular rack/host is needed
     // Refer to apis under org.apache.hadoop.net for more details on how to get figure out
     // rack/host mapping. using * as any host will do for the distributed shell app
-    request.setHostName("*");
+    request.setResourceName("*");
     // set number of containers needed
     request.setNumContainers(numContainers);
 
@@ -76,20 +76,21 @@ public final class Utilities {
    * Ask RM to allocate given no. of containers to this Application Master
    * @param requestedContainers Containers to ask for from RM
    * @return Response from RM to AM with allocated containers
+   * @throws IOException
    * @throws YarnRemoteException
    */
-  public static AMResponse sendContainerAskToRM(
+  public static AllocateResponse sendContainerAskToRM(
       AtomicInteger rmRequestID,
       ApplicationAttemptId appAttemptID,
-      AMRMProtocol resourceManager,
+      ApplicationMasterProtocol resourceManager,
       List<ResourceRequest> requestedContainers,
       List<ContainerId> releasedContainers,
-      float progress) throws YarnRemoteException {
+      float progress) throws YarnException, IOException {
     AllocateRequest req = Records.newRecord(AllocateRequest.class);
     req.setResponseId(rmRequestID.incrementAndGet());
-    req.setApplicationAttemptId(appAttemptID);
-    req.addAllAsks(requestedContainers);
-    req.addAllReleases(releasedContainers);
+    //req.setApplicationAttemptId(appAttemptID);
+    req.setAskList(requestedContainers);
+    req.setReleaseList(releasedContainers);
     req.setProgress(progress);
 
     LOG.info("Sending request to RM for containers"
@@ -105,7 +106,7 @@ public final class Utilities {
     }
 
     AllocateResponse resp = resourceManager.allocate(req);
-    return resp.getAMResponse();
+    return resp;
   }
 
   /**

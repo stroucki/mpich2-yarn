@@ -15,8 +15,8 @@ import org.apache.hadoop.ipc.ProtocolSignature;
 import org.apache.hadoop.ipc.RPC;
 import org.apache.hadoop.ipc.Server;
 import org.apache.hadoop.net.NetUtils;
-import org.apache.hadoop.yarn.YarnException;
-import org.apache.hadoop.yarn.service.AbstractService;
+import org.apache.hadoop.service.AbstractService;
+import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.webapp.WebApp;
 import org.apache.hadoop.yarn.webapp.WebApps;
 
@@ -45,13 +45,18 @@ public class MPIClientService extends AbstractService implements MPIClientProtoc
     Configuration conf = getConfig();
     try {
       LOG.info("Initializing MPIClientProtocol's RPC services");
-      server = RPC.getServer(MPIClientProtocol.class, this, "0.0.0.0", 0, conf);
+      server = new RPC.Builder(conf).setBindAddress("0.0.0.0").setInstance(this).setPort(0).setProtocol(MPIClientProtocol.class).build();
       server.start();
       bindAddress = NetUtils.getConnectAddress(server);
       LOG.info("Starting MPIClientProtocol's RPC service at" + bindAddress);
     } catch (IOException e1) {
       LOG.error("Error starting MPIClientProtocal's RPC Service", e1);
-      throw new YarnException(e1);
+      try {
+        throw new YarnException(e1);
+      } catch (YarnException e) {
+        // TODO Auto-generated catch block
+        e.printStackTrace();
+      }
     }
 
     try {
@@ -74,7 +79,7 @@ public class MPIClientService extends AbstractService implements MPIClientProtoc
     return wa.port();
   }
 
-  @Override
+  // @Override
   public String[] popAllMPIMessages() {
     BlockingQueue<String> msgs = appContext.getMpiMsgQueue();
     ArrayList<String> result = new ArrayList<String>();
@@ -96,13 +101,13 @@ public class MPIClientService extends AbstractService implements MPIClientProtoc
     this.bindAddress = bindAddress;
   }
 
-  @Override
+  // @Override
   public long getProtocolVersion(String protocol, long clientVersion)
       throws IOException {
     return MPIClientProtocol.versionID;
   }
 
-  @Override
+  // @Override
   public ProtocolSignature getProtocolSignature(String protocol,
       long clientVersion, int clientMethodsHash) throws IOException {
     return ProtocolSignature.getProtocolSignature(this,

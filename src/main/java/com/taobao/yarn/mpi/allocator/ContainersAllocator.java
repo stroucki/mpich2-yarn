@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.hadoop.yarn.api.records.Container;
-import org.apache.hadoop.yarn.exceptions.YarnRemoteException;
+import org.apache.hadoop.yarn.exceptions.YarnException;
 
 /**
  * General container allocator for different rules
@@ -19,7 +19,7 @@ public interface ContainersAllocator {
    * @return list of allocated containers
    * @throws YarnRemoteException
    */
-  List<Container> allocateContainers(int numContainer) throws YarnRemoteException;
+  List<Container> allocateContainers(int numContainer) throws YarnException;
 
   Map<String, Integer> getHostToProcNum();
 

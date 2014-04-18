@@ -35,15 +35,16 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.net.NetUtils;
-import org.apache.hadoop.yarn.api.AMRMProtocol;
+import org.apache.hadoop.service.CompositeService;
+import org.apache.hadoop.yarn.api.ApplicationClientProtocol;
 import org.apache.hadoop.yarn.api.ApplicationConstants;
-import org.apache.hadoop.yarn.api.ClientRMProtocol;
-import org.apache.hadoop.yarn.api.ContainerManager;
+import org.apache.hadoop.yarn.api.ApplicationMasterProtocol;
+import org.apache.hadoop.yarn.api.ContainerManagementProtocol;
+import org.apache.hadoop.yarn.api.protocolrecords.AllocateResponse;
 import org.apache.hadoop.yarn.api.protocolrecords.FinishApplicationMasterRequest;
 import org.apache.hadoop.yarn.api.protocolrecords.RegisterApplicationMasterRequest;
 import org.apache.hadoop.yarn.api.protocolrecords.RegisterApplicationMasterResponse;
 import org.apache.hadoop.yarn.api.protocolrecords.StartContainerRequest;
-import org.apache.hadoop.yarn.api.records.AMResponse;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.Container;
@@ -57,9 +58,8 @@ import org.apache.hadoop.yarn.api.records.LocalResourceVisibility;
 import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.api.records.ResourceRequest;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
-import org.apache.hadoop.yarn.exceptions.YarnRemoteException;
+import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.ipc.YarnRPC;
-import org.apache.hadoop.yarn.service.CompositeService;
 import org.apache.hadoop.yarn.util.ConverterUtils;
 import org.apache.hadoop.yarn.util.Records;
 
@@ -82,9 +82,9 @@ public class ApplicationMaster extends CompositeService {
   // YARN RPC to communicate with the Resource Manager or Node Manager
   private final YarnRPC rpc;
   // Handle to communicate with the Resource Manager
-  private AMRMProtocol resourceManager;
+  private ApplicationMasterProtocol resourceManager;
   // Handle to talk to the Resource Manager/Applications Manager
-  private final ClientRMProtocol applicationsManager;
+  private final ApplicationClientProtocol applicationsManager;
   // Application Attempt Id ( combination of attemptId and fail count )
   private ApplicationAttemptId appAttemptID;
   // Host name of the container, for status update of clients
@@ -505,7 +505,7 @@ public class ApplicationMaster extends CompositeService {
     // Register self with ResourceManager
     RegisterApplicationMasterResponse response = registerToRM();
     // Dump out information about cluster capability as seen by the resource manager
-    int minMem = response.getMinimumResourceCapability().getMemory();
+    int minMem = 1;
     int maxMem = response.getMaximumResourceCapability().getMemory();
     LOG.info("Min mem capabililty of resources in this cluster " + minMem);
     LOG.info("Max mem capabililty of resources in this cluster " + maxMem);
@@ -592,7 +592,7 @@ public class ApplicationMaster extends CompositeService {
             if (LOG.isDebugEnabled()) {
               LOG.debug("Sending empty request to RM, to let RM know we are alive");
             }
-            AMResponse amResp = Utilities.sendContainerAskToRM(
+            AllocateResponse amResp = Utilities.sendContainerAskToRM(
                 rmRequestID, appAttemptID, resourceManager,
                 new ArrayList<ResourceRequest>(),
                 new ArrayList<ContainerId>(),
@@ -710,12 +710,13 @@ public class ApplicationMaster extends CompositeService {
   }
 
   /**
+   * @throws IOException
    * @throws YarnRemoteException
    */
-  private void finishApp(final AMRMProtocol resourceManager, final ApplicationAttemptId appAttemptID, final FinalApplicationStatus status, final String diagnostics) throws YarnRemoteException {
+  private void finishApp(final ApplicationMasterProtocol resourceManager, final ApplicationAttemptId appAttemptID, final FinalApplicationStatus status, final String diagnostics) throws YarnException, IOException {
     FinishApplicationMasterRequest finishReq = Records.newRecord(FinishApplicationMasterRequest.class);
-    finishReq.setAppAttemptId(appAttemptID);
-    finishReq.setFinishApplicationStatus(status);
+    //finishReq.setAppAttemptId(appAttemptID);
+    //finishReq.setFinishApplicationStatus(status);
     if(!StringUtils.isBlank(diagnostics)) {
       finishReq.setDiagnostics(diagnostics);
     }
@@ -772,7 +773,7 @@ public class ApplicationMaster extends CompositeService {
     final Process pc = rt.exec(commandBuilder.toString(), envStrs);
 
     Thread stdinThread = new Thread(new Runnable() {
-      @Override
+      //  @Override
       public void run() {
         Scanner pcStdout = new Scanner(pc.getInputStream());
         while (pcStdout.hasNextLine()) {
@@ -785,7 +786,7 @@ public class ApplicationMaster extends CompositeService {
     stdinThread.start();
 
     Thread stderrThread = new Thread(new Runnable() {
-      @Override
+      //   @Override
       public void run() {
         Scanner pcStderr = new Scanner(pc.getErrorStream());
         while (pcStderr.hasNextLine()) {
@@ -798,7 +799,7 @@ public class ApplicationMaster extends CompositeService {
     stderrThread.start();
 
     Thread shutdownThread = new Thread(new Runnable() {
-      @Override
+      //   @Override
       public void run() {
         try {
           int ret = pc.waitFor();
@@ -859,7 +860,7 @@ public class ApplicationMaster extends CompositeService {
     // Allocated container
     Container container;
     // Handle to communicate with ContainerManager
-    ContainerManager cm;
+    ContainerManagementProtocol cm;
 
     //files needing to download
     private final List<FileSplit> fileSplits;
@@ -884,7 +885,7 @@ public class ApplicationMaster extends CompositeService {
           + container.getNodeId().getPort();
       InetSocketAddress cmAddress = NetUtils.createSocketAddr(cmIpPortStr);
       LOG.info("Connecting to ContainerManager at " + cmIpPortStr);
-      this.cm = ((ContainerManager) rpc.getProxy(ContainerManager.class, cmAddress, conf));
+      this.cm = ((ContainerManagementProtocol) rpc.getProxy(ContainerManagementProtocol.class, cmAddress, conf));
     }
 
     /**
@@ -892,7 +893,7 @@ public class ApplicationMaster extends CompositeService {
      * for shell command and eventually dispatches the container
      * start request to the CM.
      */
-    @Override
+    // @Override
     public Boolean call() {
       connectToCM();
 
@@ -1003,7 +1004,7 @@ public class ApplicationMaster extends CompositeService {
       startReq.setContainerLaunchContext(ctx);
       try {
         cm.startContainer(startReq);
-      } catch (YarnRemoteException e) {
+      } catch (YarnException e) {
         LOG.error("Start container failed for :"
             + ", containerId=" + container.getId(), e);
         // TODO do we need to release this container?
@@ -1017,29 +1018,30 @@ public class ApplicationMaster extends CompositeService {
    * Connect to the Resource Manager
    * @return Handle to communicate with the RM
    */
-  private AMRMProtocol connectToRM() {
+  private ApplicationMasterProtocol connectToRM() {
     YarnConfiguration yarnConf = new YarnConfiguration(conf);
     InetSocketAddress rmAddress = yarnConf.getSocketAddr(
         YarnConfiguration.RM_SCHEDULER_ADDRESS,
         YarnConfiguration.DEFAULT_RM_SCHEDULER_ADDRESS,
         YarnConfiguration.DEFAULT_RM_SCHEDULER_PORT);
     LOG.info("Connecting to ResourceManager at " + rmAddress);
-    return ((AMRMProtocol) rpc.getProxy(AMRMProtocol.class, rmAddress, conf));
+    return ((ApplicationMasterProtocol) rpc.getProxy(ApplicationMasterProtocol.class, rmAddress, conf));
   }
 
   /**
    * Register the Application Master to the Resource Manager
    * @return the registration response from the RM
+   * @throws IOException
    * @throws YarnRemoteException
    */
-  private RegisterApplicationMasterResponse registerToRM() throws YarnRemoteException {
+  private RegisterApplicationMasterResponse registerToRM() throws YarnException, IOException {
     RegisterApplicationMasterRequest appMasterRequest = Records.newRecord(RegisterApplicationMasterRequest.class);
     // set the required info into the registration request:
     // application attempt id,
     // host on which the app master is running
     // rpc port on which the app master accepts requests from the client
     // tracking url for the app master
-    appMasterRequest.setApplicationAttemptId(appAttemptID);
+    //appMasterRequest.setApplicationAttemptId(appAttemptID);
     appMasterRequest.setHost(clientService.getBindAddress().getHostName());
     appMasterRequest.setRpcPort(clientService.getBindAddress().getPort());
     appMasterRequest.setTrackingUrl(appMasterTrackingUrl);
@@ -1051,15 +1053,15 @@ public class ApplicationMaster extends CompositeService {
    * @return Handle to communicate with the ASM
    * @throws IOException
    */
-  private ClientRMProtocol connectToASM() throws IOException {
+  private ApplicationClientProtocol connectToASM() throws IOException {
     YarnConfiguration yarnConf = new YarnConfiguration(conf);
     InetSocketAddress rmAddress = yarnConf.getSocketAddr(
         YarnConfiguration.RM_ADDRESS,
         YarnConfiguration.DEFAULT_RM_ADDRESS,
         YarnConfiguration.DEFAULT_RM_PORT);
     LOG.info("Connecting to ResourceManager at " + rmAddress);
-    ClientRMProtocol applicationsManager = ((ClientRMProtocol) rpc.getProxy(
-        ClientRMProtocol.class, rmAddress, conf));
+    ApplicationClientProtocol applicationsManager = ((ApplicationClientProtocol) rpc.getProxy(
+        ApplicationClientProtocol.class, rmAddress, conf));
     return applicationsManager;
   }
 
@@ -1072,7 +1074,7 @@ public class ApplicationMaster extends CompositeService {
    * @return ContainerAllocation reference
    * @throws YarnRemoteException
    */
-  private ContainersAllocator createContainersAllocator() throws YarnRemoteException {
+  private ContainersAllocator createContainersAllocator() throws YarnException {
     // FIXME the first "new" operation is useless, we will use configuration here
     ContainersAllocator allocator = new MultiMPIProcContainersAllocator(resourceManager,
         requestPriority, containerMemory, appAttemptID);
@@ -1086,22 +1088,22 @@ public class ApplicationMaster extends CompositeService {
    */
   private class RunningAppContext implements AppContext {
 
-    @Override
+    // @Override
     public ApplicationId getApplicationID() {
       return appAttemptID.getApplicationId();
     }
 
-    @Override
+    // @Override
     public ApplicationAttemptId getApplicationAttemptId() {
       return appAttemptID;
     }
 
-    @Override
+    //  @Override
     public List<Container> getAllContainers() {
       return allContainers;
     }
 
-    @Override
+    // @Override
     public LinkedBlockingQueue<String> getMpiMsgQueue() {
       return mpiMsgs;
     }

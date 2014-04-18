@@ -33,8 +33,8 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.mapred.JobConf;
+import org.apache.hadoop.yarn.api.ApplicationClientProtocol;
 import org.apache.hadoop.yarn.api.ApplicationConstants;
-import org.apache.hadoop.yarn.api.ClientRMProtocol;
 import org.apache.hadoop.yarn.api.protocolrecords.GetNewApplicationRequest;
 import org.apache.hadoop.yarn.api.protocolrecords.GetNewApplicationResponse;
 import org.apache.hadoop.yarn.api.protocolrecords.SubmitApplicationRequest;
@@ -50,7 +50,7 @@ import org.apache.hadoop.yarn.api.records.LocalResourceVisibility;
 import org.apache.hadoop.yarn.api.records.Priority;
 import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.api.records.YarnApplicationState;
-import org.apache.hadoop.yarn.exceptions.YarnRemoteException;
+import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.util.ConverterUtils;
 import org.apache.hadoop.yarn.util.Records;
 
@@ -71,7 +71,7 @@ public class Client {
   // Configuration
   private final MPIConfiguration conf;
   // Handle to talk to the Resource Manager/Applications Manager
-  private ClientRMProtocol applicationsManager;
+  private ApplicationClientProtocol applicationsManager;
   //Handle to communicate to the ApplicationMaster
   private MPIClientProtocol mpiClient;
   // Application master specific info to register a new Application with RM/ASM
@@ -365,8 +365,9 @@ public class Client {
    * Main run function for the client
    * @return true if application completed successfully
    * @throws IOException
+   * @throws YarnException
    */
-  public boolean run() throws IOException {
+  public boolean run() throws IOException, YarnException {
     LOG.info("Starting Client");
     // Connect to ResourceManager
     applicationsManager = Utilities.connectToASM(conf);
@@ -383,7 +384,8 @@ public class Client {
     // the required resources from the RM for the app master
     // Memory ask has to be a multiple of min and less than max.
     // Dump out information about cluster capability as seen by the resource manager
-    int minMem = newApp.getMinimumResourceCapability().getMemory();
+    //int minMem = newApp.getMinimumResourceCapability().getMemory();
+    int minMem = 1;
     int maxMem = newApp.getMaximumResourceCapability().getMemory();
     LOG.info("Min mem capabililty of resources in this cluster " + minMem);
     LOG.info("Max mem capabililty of resources in this cluster " + maxMem);
@@ -561,7 +563,7 @@ public class Client {
     // For now, only memory is supported so we set memory requirements
     Resource capability = Records.newRecord(Resource.class);
     capability.setMemory(amMemory);
-    amContainer.setResource(capability);
+    appContext.setResource(capability);
 
     appContext.setAMContainerSpec(amContainer);
 
@@ -585,8 +587,8 @@ public class Client {
       LOG.info("Submitting application to ASM");
       SubmitApplicationResponse submitResp = applicationsManager.submitApplication(appRequest);
       isRunning.set(submitResp != null);
-      LOG.info("Submisstion result: " + isRunning);
-    } catch (YarnRemoteException e) {
+      LOG.info("Submission result: " + isRunning);
+    } catch (YarnException e) {
       LOG.error("Submission failure.", e);
       return false;
     }
@@ -601,8 +603,9 @@ public class Client {
    * @param appId Application Id of application to be monitored
    * @return true if application completed successfully
    * @throws IOException
+   * @throws YarnException
    */
-  private boolean monitorApplication() throws IOException {
+  private boolean monitorApplication() throws IOException, YarnException {
 
     Runtime.getRuntime().addShutdownHook(
         new KillRunningAppHook(isRunning, applicationsManager, appId));
@@ -613,7 +616,7 @@ public class Client {
       if (mpiClient == null && isRunning.get() == true) {
         LOG.info("Got application report from ASM for"
             + ", appId=" + appId.getId()
-            + ", clientToken=" + report.getClientToken()
+            + ", clientToken=" + report.getClientToAMToken()
             + ", appDiagnostics=" + report.getDiagnostics()
             + ", appMasterHost=" + report.getHost()
             + ", rpcPort:" + report.getRpcPort()
@@ -676,9 +679,10 @@ public class Client {
   /**
    * Get a new application from the ASM
    * @return New Application
+   * @throws IOException
    * @throws YarnRemoteException
    */
-  private GetNewApplicationResponse getApplication() throws YarnRemoteException {
+  private GetNewApplicationResponse getApplication() throws YarnException, IOException {
     GetNewApplicationRequest request = Records.newRecord(GetNewApplicationRequest.class);
     GetNewApplicationResponse response = applicationsManager.getNewApplication(request);
     LOG.info("Got new application id=" + response.getApplicationId());
@@ -741,7 +745,7 @@ public class Client {
       if (null == appId)
         return false;
       Utilities.killApplication(applicationsManager, appId);
-    } catch (YarnRemoteException e) {
+    } catch (YarnException e) {
       LOG.error("Killing " + appIdToKill + " failed", e);
       return false;
     } catch (IOException e) {
@@ -757,8 +761,10 @@ public class Client {
     if (!m.matches())
       return null;
     ApplicationId appId = Records.newRecord(ApplicationId.class);
+    /*
     appId.setClusterTimestamp(Long.parseLong(m.group(1)));
     appId.setId(Integer.parseInt(m.group(2)));
+     */
     return appId;
   }
 }
