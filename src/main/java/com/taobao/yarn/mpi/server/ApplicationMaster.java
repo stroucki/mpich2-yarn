@@ -38,6 +38,7 @@ import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.service.CompositeService;
 import org.apache.hadoop.yarn.api.ApplicationClientProtocol;
 import org.apache.hadoop.yarn.api.ApplicationConstants;
+import org.apache.hadoop.yarn.api.ApplicationConstants.Environment;
 import org.apache.hadoop.yarn.api.ApplicationMasterProtocol;
 import org.apache.hadoop.yarn.api.ContainerManagementProtocol;
 import org.apache.hadoop.yarn.api.protocolrecords.AllocateResponse;
@@ -45,6 +46,7 @@ import org.apache.hadoop.yarn.api.protocolrecords.FinishApplicationMasterRequest
 import org.apache.hadoop.yarn.api.protocolrecords.RegisterApplicationMasterRequest;
 import org.apache.hadoop.yarn.api.protocolrecords.RegisterApplicationMasterResponse;
 import org.apache.hadoop.yarn.api.protocolrecords.StartContainerRequest;
+import org.apache.hadoop.yarn.api.protocolrecords.StartContainersRequest;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.Container;
@@ -254,6 +256,7 @@ public class ApplicationMaster extends CompositeService {
     Map<String, String> envs = System.getenv();
 
     appAttemptID = Records.newRecord(ApplicationAttemptId.class);
+    /*
     if (!envs.containsKey(ApplicationConstants.AM_CONTAINER_ID_ENV)) {
       // Only for test purpose
       if (cliParser.hasOption("app_attempt_id")) {
@@ -265,12 +268,48 @@ public class ApplicationMaster extends CompositeService {
     } else {
       ContainerId containerId = ConverterUtils.toContainerId(envs.get(ApplicationConstants.AM_CONTAINER_ID_ENV));
       appAttemptID = containerId.getApplicationAttemptId();
+    }*/
+
+    if (!envs.containsKey(Environment.CONTAINER_ID.name())) {
+      if (cliParser.hasOption("app_attempt_id")) {
+        String appIdStr = cliParser.getOptionValue("app_attempt_id", "");
+        appAttemptID = ConverterUtils.toApplicationAttemptId(appIdStr);
+      } else {
+        throw new IllegalArgumentException(
+            "Application Attempt Id not set in the environment");
+      }
+    } else {
+      ContainerId containerId = ConverterUtils.toContainerId(envs
+          .get(Environment.CONTAINER_ID.name()));
+      appAttemptID = containerId.getApplicationAttemptId();
+    }
+    //inserted additional env checks for consistency with DistributedShell
+    if (!envs.containsKey(ApplicationConstants.APP_SUBMIT_TIME_ENV)) {
+      throw new RuntimeException(ApplicationConstants.APP_SUBMIT_TIME_ENV
+          + " not set in the environment");
+    }
+    if (!envs.containsKey(Environment.NM_HOST.name())) {
+      throw new RuntimeException(Environment.NM_HOST.name()
+          + " not set in the environment");
+    }
+    if (!envs.containsKey(Environment.NM_HTTP_PORT.name())) {
+      throw new RuntimeException(Environment.NM_HTTP_PORT
+          + " not set in the environment");
+    }
+    if (!envs.containsKey(Environment.NM_PORT.name())) {
+      throw new RuntimeException(Environment.NM_PORT.name()
+          + " not set in the environment");
     }
 
-    LOG.info("Application master for app"
+    LOG.info("Application master for app" + ", appId="
+        + appAttemptID.getApplicationId().getId() + ", clustertimestamp="
+        + appAttemptID.getApplicationId().getClusterTimestamp()
+        + ", attemptId=" + appAttemptID.getAttemptId());
+
+    /*    LOG.info("Application master for app"
         + ", appId=" + appAttemptID.getApplicationId().getId()
         + ", clustertimestamp=" + appAttemptID.getApplicationId().getClusterTimestamp()
-        + ", attemptId=" + appAttemptID.getAttemptId());
+        + ", attemptId=" + appAttemptID.getAttemptId());*/
 
     assert(envs.containsKey(MPIConstants.MPIEXECLOCATION));
     hdfsMPIExecLocation = envs.get(MPIConstants.MPIEXECLOCATION);
@@ -370,11 +409,13 @@ public class ApplicationMaster extends CompositeService {
       }
     }
 
-    if (envs.containsKey(ApplicationConstants.NM_HOST_ENV)) {
+    /*  //NM_HOST_ENV is no longer exposed in the Environment
+     *     if (envs.containsKey(Environment.NM_HOST_ENV)) {
       appMasterHostname = envs.get(ApplicationConstants.NM_HOST_ENV);
       LOG.info("Environment " + ApplicationConstants.NM_HOST_ENV + " is "
           + appMasterHostname);
-    }
+    }*/
+    appMasterHostname = NetUtils.getHostname();
 
     mpiExecDir = Utilities.getMpiExecDir(conf, appAttemptID);
 
@@ -493,8 +534,9 @@ public class ApplicationMaster extends CompositeService {
   /**
    * Main run function for the application master
    * @throws IOException
+   * @throws YarnException
    */
-  public boolean run() throws IOException {
+  public boolean run() throws IOException, YarnException {
     LOG.info("Starting ApplicationMaster");
     // Connect to ResourceManager
     resourceManager = connectToRM();
@@ -503,26 +545,31 @@ public class ApplicationMaster extends CompositeService {
     // TODO use the rpc port info to register with the RM for the client to send requests to this app master
     initAndStartRPCServices();
     // Register self with ResourceManager
-    RegisterApplicationMasterResponse response = registerToRM();
-    // Dump out information about cluster capability as seen by the resource manager
-    int minMem = 1;
-    int maxMem = response.getMaximumResourceCapability().getMemory();
-    LOG.info("Min mem capabililty of resources in this cluster " + minMem);
-    LOG.info("Max mem capabililty of resources in this cluster " + maxMem);
+    try {
+      RegisterApplicationMasterResponse response = registerToRM();
 
-    // A resource ask has to be atleast the minimum of the capability of the cluster, the value has to be
-    // a multiple of the min value and cannot exceed the max.
-    // If it is not an exact multiple of min, the RM will allocate to the nearest multiple of min
-    if (containerMemory < minMem) {
-      LOG.info("Container memory specified below min threshold of cluster. Using min value."
-          + ", specified=" + containerMemory
-          + ", min=" + minMem);
-      containerMemory = minMem;  // container memory should be multiple of minMem
-    } else if (containerMemory > maxMem) {
-      LOG.info("Container memory specified above max threshold of cluster. Using max value."
-          + ", specified=" + containerMemory
-          + ", max=" + maxMem);
-      containerMemory = maxMem;
+      // Dump out information about cluster capability as seen by the resource manager
+      int minMem = 1;
+      int maxMem = response.getMaximumResourceCapability().getMemory();
+      LOG.info("Min mem capabililty of resources in this cluster " + minMem);
+      LOG.info("Max mem capabililty of resources in this cluster " + maxMem);
+
+      // A resource ask has to be atleast the minimum of the capability of the cluster, the value has to be
+      // a multiple of the min value and cannot exceed the max.
+      // If it is not an exact multiple of min, the RM will allocate to the nearest multiple of min
+      if (containerMemory < minMem) {
+        LOG.info("Container memory specified below min threshold of cluster. Using min value."
+            + ", specified=" + containerMemory
+            + ", min=" + minMem);
+        containerMemory = minMem;  // container memory should be multiple of minMem
+      } else if (containerMemory > maxMem) {
+        LOG.info("Container memory specified above max threshold of cluster. Using max value."
+            + ", specified=" + containerMemory
+            + ", max=" + maxMem);
+        containerMemory = maxMem;
+      }
+    } catch (YarnException e) {
+      e.printStackTrace();
     }
 
     // Setup heartbeat emitter
@@ -532,11 +579,13 @@ public class ApplicationMaster extends CompositeService {
     // defined by DEFAULT_RM_AM_EXPIRY_INTERVAL_MS. The allocate calls to the RM
     // count as heartbeats so, for now, this additional heartbeat emitter is not required.
     List<FutureTask<Boolean>> launchResults = new ArrayList<FutureTask<Boolean>>();
+
     ContainersAllocator allocator = createContainersAllocator();
     allContainers = allocator.allocateContainers(numTotalContainers);
     numTotalContainers = allContainers.size();
     // TODO Available where we use MultiMPIProcContainersAllocator strategy
     hostToProcNum = allocator.getHostToProcNum();
+
     AtomicInteger rmRequestID = new AtomicInteger(allocator.getCurrentRequestId());
     //key(Integer) represent the containerID;value(List<FileSplit>) represent the files which need to be downloaded
     ConcurrentHashMap<Integer,List<FileSplit>> splits = getFileSplit(fileDownloads, fileToLocation, allContainers);
@@ -548,7 +597,7 @@ public class ApplicationMaster extends CompositeService {
           + ", containerNode=" + allocatedContainer.getNodeId().getHost()
           + ":" + allocatedContainer.getNodeId().getPort()
           + ", containerNodeURI=" + allocatedContainer.getNodeHttpAddress()
-          + ", containerState" + allocatedContainer.getState()
+          //          + ", containerState" + allocatedContainer.getState()
           + ", containerResourceMemory" + allocatedContainer.getResource().getMemory());
       LaunchContainer runnableLaunchContainer =
           new LaunchContainer(allocatedContainer, splits.get(Integer.valueOf(allocatedContainer.getId().getId())), resultToDestination.values());
@@ -892,20 +941,22 @@ public class ApplicationMaster extends CompositeService {
      * Connects to CM, sets up container launch context
      * for shell command and eventually dispatches the container
      * start request to the CM.
+     * @throws IOException
      */
     // @Override
-    public Boolean call() {
+    public Boolean call() throws IOException {
       connectToCM();
 
       LOG.info("Setting up container launch container for containerid=" + container.getId());
 
       ContainerLaunchContext ctx = Records.newRecord(ContainerLaunchContext.class);
-      ctx.setContainerId(container.getId());
-      ctx.setResource(container.getResource());
+      // FIXME : container, resource, user are no longer settable in ctx (revisit to confirm)
+      //ctx.setContainerId(container.getId());
+      //ctx.setResource(container.getResource());
 
       String jobUserName = System.getenv(ApplicationConstants.Environment.USER.name());
-      ctx.setUser(jobUserName);
-      LOG.info("Setting user in ContainerLaunchContext to: " + jobUserName);
+      //ctx.setUser(jobUserName);
+      //LOG.info("Setting user in ContainerLaunchContext to: " + jobUserName);
 
       // Set the local resources for each container
       Map<String, LocalResource> localResources = new HashMap<String, LocalResource>();
@@ -963,7 +1014,7 @@ public class ApplicationMaster extends CompositeService {
       env.put(MPIConstants.CONTAINOUTPUT, Utilities.encodeMPIResult(results));
 
       env.put("CONTAINER_ID", String.valueOf(container.getId().getId()));
-      env.put("APPMASTER_HOST", System.getenv(ApplicationConstants.NM_HOST_ENV));
+      env.put("APPMASTER_HOST", appMasterHostname);
       env.put("APPMASTER_PORT", String.valueOf(mpdListener.getServerPort()));
       ctx.setEnvironment(env);
 
@@ -1003,7 +1054,10 @@ public class ApplicationMaster extends CompositeService {
       StartContainerRequest startReq = Records.newRecord(StartContainerRequest.class);
       startReq.setContainerLaunchContext(ctx);
       try {
-        cm.startContainer(startReq);
+        List<StartContainerRequest> theList = new ArrayList<StartContainerRequest>(1);
+        theList.add(startReq);
+        StartContainersRequest startReqs = StartContainersRequest.newInstance(theList);
+        cm.startContainers(startReqs);
       } catch (YarnException e) {
         LOG.error("Start container failed for :"
             + ", containerId=" + container.getId(), e);

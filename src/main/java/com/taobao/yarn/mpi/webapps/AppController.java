@@ -31,7 +31,10 @@ public class AppController extends Controller {
     for (Container container : containers) {
       set(MPIWebConst.CONTAINER_HTTP_ADDRESS_PREFIX + i, container.getNodeHttpAddress());
       set(MPIWebConst.CONTAINER_ID_PREFIX + i, container.getId().toString());
-      set(MPIWebConst.CONTAINER_STATUS_PREFIX + i, container.getState().toString());
+      //set(MPIWebConst.CONTAINER_STATUS_PREFIX + i, container.getState().toString());
+      // TODO: state no longer available from container object. Requestable through CMProtocol::getContainerStatuses(GetContainerStatusesRequest)
+      //       but requires a ContainerManagementProtocol handle to be available.
+      set(MPIWebConst.CONTAINER_STATUS_PREFIX + i, "UNAVAILABLE");
       i++;
     }
     render(IndexPage.class);

@@ -17,7 +17,7 @@ public interface ContainersAllocator {
    * Allocate Containers
    * @param numContainer the number of containers to allocate
    * @return list of allocated containers
-   * @throws YarnRemoteException
+   * @throws YarnException
    */
   List<Container> allocateContainers(int numContainer) throws YarnException;
 
