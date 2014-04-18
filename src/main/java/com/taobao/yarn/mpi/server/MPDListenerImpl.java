@@ -67,7 +67,7 @@ public class MPDListenerImpl extends CompositeService implements MPDProtocol, MP
     server.start();
   }
 
-  @Override
+  //@Override
   public void reportStatus(int containerId, MPDStatus containerStatus) {
     LOG.info(containerId + " report status " + containerStatus);
     containerToStatus.put(containerId, containerStatus);
@@ -77,26 +77,26 @@ public class MPDListenerImpl extends CompositeService implements MPDProtocol, MP
     }
   }
 
-  @Override
+  // @Override
   public long getProtocolVersion(String protocol, long clientVersion)
       throws IOException {
     return MPDProtocol.versionID;
   }
 
-  @Override
+  // @Override
   public ProtocolSignature getProtocolSignature(String protocol,
       long clientVersion, int clientMethodsHash) throws IOException {
     return ProtocolSignature.getProtocolSignature(this,
         protocol, clientVersion, clientMethodsHash);
   }
 
-  @Override
+  // @Override
   public void addContainer(int containerId) {
     containerToStatus.put(containerId, MPDStatus.UNDEFINED);
     taskHeartbeatHandler.register(containerId);
   }
 
-  @Override
+  // @Override
   public boolean isAllMPDStarted() throws MPDException {
     Iterator<Entry<Integer, MPDStatus>> i = containerToStatus.entrySet().iterator();
     if (containerToStatus.isEmpty()) {
@@ -117,17 +117,17 @@ public class MPDListenerImpl extends CompositeService implements MPDProtocol, MP
     return true;
   }
 
-  @Override
+  //@Override
   public int getServerPort() {
     return server.getPort();
   }
 
-  @Override
+  //  @Override
   public void ping(int containerId) {
     taskHeartbeatHandler.pinged(containerId);
   }
 
-  @Override
+  //  @Override
   public boolean isAllHealthy() throws MPDException {
     Boolean healthy = true;
     Iterator<Entry<Integer, MPDStatus>> i = containerToStatus.entrySet().iterator();
