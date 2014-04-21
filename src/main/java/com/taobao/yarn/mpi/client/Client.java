@@ -531,7 +531,8 @@ public class Client {
     // log are specified by the nodeManager's container-log4j.properties and client can specify the MPI_AM_LOG_LEVEL and MPI_AM_LOG_SIZE
     String logLevel = conf.get(MPIConfiguration.MPI_AM_LOG_LEVEL, MPIConfiguration.DEFAULT_MPI_AM_LOG_LEVEL);
     long logSize = conf.getLong(MPIConfiguration.MPI_AM_LOG_SIZE, MPIConfiguration.DEFAULT_MPI_AM_LOG_SIZE);
-    Utilities.addLog4jSystemProperties(logLevel, logSize, vargs);
+    // comment out all the log4j setup
+    //Utilities.addLog4jSystemProperties(logLevel, logSize, vargs);
     //set java opts except memory
     if (!StringUtils.isBlank(jvmOptions)) {
       vargs.add(jvmOptions);

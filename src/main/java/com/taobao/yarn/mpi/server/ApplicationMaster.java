@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -34,7 +35,11 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.DataOutputBuffer;
 import org.apache.hadoop.net.NetUtils;
+import org.apache.hadoop.security.Credentials;
+import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.service.CompositeService;
 import org.apache.hadoop.yarn.api.ApplicationClientProtocol;
 import org.apache.hadoop.yarn.api.ApplicationConstants;
@@ -62,6 +67,7 @@ import org.apache.hadoop.yarn.api.records.ResourceRequest;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.ipc.YarnRPC;
+import org.apache.hadoop.yarn.security.AMRMTokenIdentifier;
 import org.apache.hadoop.yarn.util.ConverterUtils;
 import org.apache.hadoop.yarn.util.Records;
 
@@ -954,6 +960,22 @@ public class ApplicationMaster extends CompositeService {
       //ctx.setContainerId(container.getId());
       //ctx.setResource(container.getResource());
 
+      ////// Generate token information ///////
+      Credentials credentials =
+          UserGroupInformation.getCurrentUser().getCredentials();
+      DataOutputBuffer dob = new DataOutputBuffer();
+      credentials.writeTokenStorageToStream(dob);
+      // Now remove the AM->RM token so that containers cannot access it.
+      Iterator<Token<?>> iter = credentials.getAllTokens().iterator();
+      while (iter.hasNext()) {
+        Token<?> token = iter.next();
+        if (token.getKind().equals(AMRMTokenIdentifier.KIND_NAME)) {
+          iter.remove();
+        }
+      }
+      ByteBuffer allTokens = ByteBuffer.wrap(dob.getData(), 0, dob.getLength());
+      //////Generate token information ///////
+
       String jobUserName = System.getenv(ApplicationConstants.Environment.USER.name());
       //ctx.setUser(jobUserName);
       //LOG.info("Setting user in ContainerLaunchContext to: " + jobUserName);
@@ -1027,7 +1049,7 @@ public class ApplicationMaster extends CompositeService {
       // log are specified by the nodeManager's container-log4j.properties and nodemanager can specify the MPI_AM_LOG_LEVEL and MPI_AM_LOG_SIZE
       String logLevel = conf.get(MPIConfiguration.MPI_CONTAINER_LOG_LEVEL, MPIConfiguration.DEFAULT_MPI_CONTAINER_LOG_LEVEL);
       long logSize = conf.getLong(MPIConfiguration.MPI_CONTAINER_LOG_SIZE, MPIConfiguration.DEFAULT_MPI_CONTAINER_LOG_SIZE);
-      Utilities.addLog4jSystemProperties(logLevel, logSize, vargs);
+      //Utilities.addLog4jSystemProperties(logLevel, logSize, vargs);
       String javaOpts = conf.get(MPIConfiguration.MPI_CONTAINER_JAVA_OPTS_EXCEPT_MEMORY,"");
       if (!StringUtils.isBlank(javaOpts)) {
         vargs.add(javaOpts);
@@ -1050,6 +1072,8 @@ public class ApplicationMaster extends CompositeService {
       commands.add(containerCmd.toString());
       LOG.info("Executing command: " + commands.toString());
       ctx.setCommands(commands);
+      // duplicate tokens
+      ctx.setTokens(allTokens.duplicate());
 
       StartContainerRequest startReq = Records.newRecord(StartContainerRequest.class);
       startReq.setContainerLaunchContext(ctx);
